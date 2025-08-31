@@ -4,8 +4,9 @@ import argparse
 import os
 from datetime import datetime, date
 
+# 支持香港 美国期权
+option_pattern = re.compile(r'^(US|HK)\.([A-Z0-9]+)(\d{6})([CP])(\d+)$')
 
-# --- 以下函数保持不变，因为它们的逻辑是正确的 ---
 
 def preprocess_data(file_path):
     """
@@ -41,9 +42,6 @@ def preprocess_data(file_path):
     df.sort_values(by='交易时间', inplace=True)
 
     return df
-
-
-option_pattern = re.compile(r'US.([A-Z]+)(\d{6})([CP])(\d+)')
 
 
 def classify_asset(code):
