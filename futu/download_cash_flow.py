@@ -158,7 +158,7 @@ def get_history_cash_flow():
         final_df = final_df.drop_duplicates(subset=['cashflow_id'], keep='first')
         # 打印最终结果的汇总信息
         # print(final_df)
-        out_path = os.path.join('..', 'data', 'futu_cash_flow.csv')
+        out_path = os.path.join(os.path.dirname(__file__), '..', 'data', 'futu_cash_flow.csv')
         # 生成目标DataFrame
         out_df = pd.DataFrame()
         out_df['id'] = final_df['cashflow_id']

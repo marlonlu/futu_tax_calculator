@@ -87,7 +87,7 @@ def get_history_orders():
             # 遍历所有市场
             for market in markets_to_query:
                 # print(f"  ...正在查询市场: {market}")
-                
+
                 # 设置查询时间范围， 目前追溯 2022，提前 1 年获取 避免某些卖出单没有找到买入单
                 start_date = datetime(2021, 1, 1)
                 # 如果是美股，那么这里就是美东区 冬令时，也就意味着 订单记录上 > 12/31 11:00 时间代表已经上 2025年 1.1日
@@ -198,14 +198,14 @@ def get_history_orders():
         
         # 保存结果到统一的CSV文件
         # 路径
-        out_path = os.path.join('..', 'data', 'futu_history_raw.csv')
+        out_path = os.path.join(os.path.dirname(__file__), '..', 'data', 'futu_history_raw.csv')
         os.makedirs('data', exist_ok=True)
         final_df.to_csv(out_path, index=False, encoding='utf-8-sig')
         print(f"\n所有账户数据已合并保存到 {out_path}")
 
         # final 再精简下表结构
         # 路径
-        out_path = os.path.join('..', 'data', 'futu_history.csv')
+        out_path = os.path.join(os.path.dirname(__file__), '..', 'data', 'futu_history.csv')
         # 生成目标DataFrame
         out_df = pd.DataFrame()
         out_df['股票代码'] = final_df['code']
