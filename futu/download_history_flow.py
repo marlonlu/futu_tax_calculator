@@ -32,14 +32,22 @@ class RateLimiter:
             self.requests.append(time.time())
 
 def get_history_orders():
-    SysConfig.INIT_RSA_FILE = os.environ.get("FUTU_RSA")
-    host = os.environ.get("FUTU_ADDRESS")
+    host = os.environ.get("FUTU_ADDRESS", "").strip()
     port = int(os.environ.get("FUTU_PORT"))
-    # 创建OpenD连接
-    quote_ctx = OpenQuoteContext(host=host, port=port)
-    # 不指定市场，获取所有市场的交易权限
-    trade_ctx = OpenSecTradeContext(host=host, port=port, filter_trdmarket=TrdMarket.NONE, is_encrypt=True)
-    
+    is_local_futu_api = host == "127.0.0.1"
+    if is_local_futu_api:
+        # 创建OpenD连接
+        quote_ctx = OpenQuoteContext(host=host, port=port)
+        # 不指定市场，获取所有市场的交易权限
+        trade_ctx = OpenSecTradeContext(host=host, port=port, filter_trdmarket=TrdMarket.NONE, is_encrypt=False)
+    else:
+        # 不是本地网络请求必须要设置 rsa
+        SysConfig.INIT_RSA_FILE = os.environ.get("FUTU_RSA")
+        # 创建OpenD连接
+        quote_ctx = OpenQuoteContext(host=host, port=port)
+        # 不指定市场，获取所有市场的交易权限
+        trade_ctx = OpenSecTradeContext(host=host, port=port, filter_trdmarket=TrdMarket.NONE, is_encrypt=True)
+
     # 创建请求限制器（30秒内最多10次请求）
     rate_limiter = RateLimiter(max_requests=9, time_window=30)
     
@@ -106,7 +114,8 @@ def get_history_orders():
                     )
                     
                     if ret != RET_OK:
-                        print(f'    获取历史订单失败: {data}')
+                        print(f'    ❌ ❌ 获取历史订单失败: {data} ❌ ❌ ')
+                        return
                     
                     if isinstance(data, pd.DataFrame) and not data.empty:
                         data['acc_id'] = acc_id  # 新增：为每个订单加上acc_id
