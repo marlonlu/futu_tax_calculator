@@ -243,3 +243,5 @@ personal/
 *.crt
 *.p12
 *.pfx
+
+.codebuddy/
