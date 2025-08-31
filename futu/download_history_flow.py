@@ -41,7 +41,7 @@ def get_history_orders():
     trade_ctx = OpenSecTradeContext(host=host, port=port, filter_trdmarket=TrdMarket.NONE, is_encrypt=True)
     
     # 创建请求限制器（30秒内最多10次请求）
-    rate_limiter = RateLimiter(max_requests=10, time_window=30)
+    rate_limiter = RateLimiter(max_requests=9, time_window=30)
     
     # 存储所有账户的所有订单
     all_accounts_orders = []
@@ -49,8 +49,6 @@ def get_history_orders():
     # 定义要查询的市场列表
     # markets_to_query = [TrdMarket.US, TrdMarket.HK]
     markets_to_query = [TrdMarket.NONE]
-    # card_num 8969 老的港股，9503 老的美股， 6807 新的保证金综合账户
-    # card_num_to_query = ['1001100120228969', '1001100520109503', '1001378017386807']
     try:
         # 获取账户列表
         ret, acc_list_df = trade_ctx.get_acc_list()
@@ -62,7 +60,7 @@ def get_history_orders():
         for _, acc_row in acc_list_df.iterrows():
             acc_id = acc_row.get('acc_id')
             card_num = acc_row.get('card_num')
-            if acc_row.get("trd_env")==TrdEnv.SIMULATE:
+            if acc_row.get("trd_env")==TrdEnv.SIMULATE or acc_row.get("acc_type")==TrdAccType.CASH:
                 continue
             if acc_id is None:
                 continue
@@ -82,10 +80,11 @@ def get_history_orders():
             for market in markets_to_query:
                 # print(f"  ...正在查询市场: {market}")
                 
-                # 设置查询时间范围
-                start_date = datetime(2022, 1, 1)
-                end_date = datetime(2025, 8, 31)
-                
+                # 设置查询时间范围， 目前追溯 2022，提前 1 年获取 避免某些卖出单没有找到买入单
+                start_date = datetime(2021, 1, 1)
+                # 如果是美股，那么这里就是美东区 冬令时，也就意味着 订单记录上 > 12/31 11:00 时间代表已经上 2025年 1.1日
+                end_date = datetime(2025, 1, 1)
+
                 # 每3个月为一个批次
                 current_start = start_date
                 
@@ -189,14 +188,15 @@ def get_history_orders():
         # print(final_df)
         
         # 保存结果到统一的CSV文件
-        filename = 'data/futu_history_raw.csv'
+        # 路径
+        out_path = os.path.join('..', 'data', 'futu_history_raw.csv')
         os.makedirs('data', exist_ok=True)
-        final_df.to_csv(filename, index=False, encoding='utf-8-sig')
-        print(f"\n所有账户数据已合并保存到 {filename}")
+        final_df.to_csv(out_path, index=False, encoding='utf-8-sig')
+        print(f"\n所有账户数据已合并保存到 {out_path}")
 
         # final 再精简下表结构
         # 路径
-        out_path = os.path.join('data', 'futu_history.csv')
+        out_path = os.path.join('..', 'data', 'futu_history.csv')
         # 生成目标DataFrame
         out_df = pd.DataFrame()
         out_df['股票代码'] = final_df['code']

@@ -41,7 +41,7 @@ def get_history_cash_flow():
     trade_ctx = OpenSecTradeContext(host=host, port=port, filter_trdmarket=TrdMarket.NONE, is_encrypt=True)
     
     # 创建请求限制器（30秒内最多20次请求）
-    rate_limiter = RateLimiter(max_requests=20, time_window=30)
+    rate_limiter = RateLimiter(max_requests=19, time_window=30)
     
     # 存储所有账户的所有订单
     all_accounts_orders = []
@@ -49,8 +49,6 @@ def get_history_cash_flow():
     # 定义要查询的市场列表
     # markets_to_query = [TrdMarket.US, TrdMarket.HK]
     markets_to_query = [TrdMarket.NONE]
-    # card_num '1001100120228969' 老的港股，'1001100520109503' 老的美股， '1001378017386807' 新的保证金综合账户
-    card_num_to_query = ['1001100120228969', '1001100520109503']
     try:
         # 获取账户列表
         ret, acc_list_df = trade_ctx.get_acc_list()
@@ -61,12 +59,9 @@ def get_history_cash_flow():
         # 遍历所有账户
         for _, acc_row in acc_list_df.iterrows():
             acc_id = acc_row.get('acc_id')
-            card_num = acc_row.get('card_num')
-            if acc_row.get("trd_env")==TrdEnv.SIMULATE:
+            if acc_row.get("trd_env")==TrdEnv.SIMULATE or acc_row.get("acc_type")==TrdAccType.CASH:
                 continue
             if acc_id is None:
-                continue
-            if card_num not in card_num_to_query:
                 continue
             print(acc_row.get("uni_card_num"))
             
@@ -155,7 +150,7 @@ def get_history_cash_flow():
         final_df = final_df.drop_duplicates(subset=['cashflow_id'], keep='first')
         # 打印最终结果的汇总信息
         # print(final_df)
-        out_path = os.path.join('data', 'futu_cash_flow.csv')
+        out_path = os.path.join('..', 'data', 'futu_cash_flow.csv')
         # 生成目标DataFrame
         out_df = pd.DataFrame()
         out_df['id'] = final_df['cashflow_id']

@@ -38,8 +38,7 @@ def run_test_case(test_dir, input_filename):
                 return success, message
 
     if not expected_file:
-        print(f"警告：在 {test_dir} 中未找到预期的输出文件 (例如, test_data_2023.csv)。跳过此目录。")
-        return True, ""
+        return False, f"警告：在 {test_dir} 中未找到预期的输出文件 (例如, test_data_2023.csv)。跳过此目录。"
 
     # 比较结果
     return True, ""
@@ -117,7 +116,8 @@ def main():
     """
     主测试函数。
     """
-    test_data_dir = '../test_data'
+    test_data_dir = os.path.join(os.path.dirname(__file__), '..', 'test_data', '')
+    # test_data_dir = '../test_data'
     all_tests_passed = True
     
     if not os.path.isdir(test_data_dir):

@@ -1,4 +1,17 @@
 ## python 环境
+# 在你的项目目录下
+# 1. 创建虚拟环境 (例如，名为 venv)
+python3 -m venv venv
+
+# 2. 激活虚拟环境
+source venv/bin/activate
+
+# 3. 在虚拟环境中，你可以安全地使用 pip
+#    这时 `python` 和 `pip` 都指向虚拟环境内的版本
+pip install -r requirements.txt
+
+# 4. 完成工作后，退出虚拟环境
+deactivate
 
 ## 各平台数据下载流程
 

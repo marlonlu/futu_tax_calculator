@@ -34,15 +34,6 @@ def preprocess_data(file_path):
     }
     df['买卖方向'] = df['买卖方向'].replace(replacement_map)
 
-    # 大模型经常出现买卖方向不同的关键词，这里打印下
-    print("-" * 30)
-    # 使用 value_counts() 统计每个 key 的出现次数
-    key_counts = df['买卖方向'].value_counts()
-    print("统计结果 (key: 个数):")
-    # 遍历 Series 并以 'key: 个数' 格式打印
-    for key, count in key_counts.items():
-        print(f"{key}: {count}")
-
     # 移除关键数据列中的NaN值
     df.dropna(subset=['数量', '成交价格', '合计手续费', '交易时间'], inplace=True)
 
@@ -315,7 +306,7 @@ def generate_and_save_reports(df, output_dir):
     for code, group_df in df.groupby('股票代码'):
         asset_type = group_df['资产类型'].iloc[0]
 
-        print(f"正在处理资产: {code} ({asset_type})")
+        # print(f"正在处理资产: {code} ({asset_type})")
 
         if asset_type == 'Stock':
             stock_results = process_stock_transactions(group_df, code)
@@ -434,8 +425,10 @@ def calculate_tax(input_file, output_dir):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='股票及期权年度报税计算器')
-    parser.add_argument('--input', type=str, default='data/futu_history.csv', help='输入的CSV文件路径')
-    parser.add_argument('--output', type=str, default='税务报告', help='输出报告的文件夹路径')
+    default_csv_file_path = os.path.join(os.path.dirname(__file__), '..', 'data', 'futu_history.csv')
+    default_out_dir_path = os.path.join(os.path.dirname(__file__), '..', '税务报告')
+    parser.add_argument('--input', type=str, default=default_csv_file_path, help='输入的CSV文件路径')
+    parser.add_argument('--output', type=str, default=default_out_dir_path, help='输出报告的文件夹路径')
     args = parser.parse_args()
 
     # 确保输出目录存在
