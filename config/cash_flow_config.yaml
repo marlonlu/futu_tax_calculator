@@ -1,0 +1,11 @@
+# 现金流配置
+time_range:
+  start_date: "2022-01-01"    # 现金流开始时间
+  end_date: "2025-01-01"      # 现金流结束时间
+
+output:
+  file: "futu_cash_flow.csv"  # 现金流文件名
+
+account:
+  exclude_simulate: true      # 排除模拟账户
+  exclude_cash: true          # 排除现金账户

@@ -1,0 +1,8 @@
+# 富途连接配置
+connection:
+  default_host: "127.0.0.1"   # 默认IP地址
+  default_port: 11111         # 默认端口号
+  # 其他连接参数通过环境变量获取：
+  # FUTU_ADDRESS - 服务器地址（优先级高于default_host）
+  # FUTU_PORT - 端口号（优先级高于default_port）
+  # FUTU_RSA - RSA密钥文件路径

@@ -15,3 +15,7 @@ futu-api
 # Used in all Python files
 pandas
 
+# Used for parsing YAML configuration files
+# from futu_cli/common/config.py
+PyYAML
+

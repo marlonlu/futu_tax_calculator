@@ -1,0 +1,16 @@
+# 历史订单配置
+time_range:
+  start_date: "2021-01-01"    # 历史订单开始时间
+  end_date: "2025-01-01"      # 历史订单结束时间
+
+batch_processing:
+  time_batch_days: 90         # 时间批次大小（天）
+  fee_query_batch_size: 400   # 费用查询批次大小
+
+output:
+  raw_file: "futu_history_raw.csv"      # 原始数据文件名
+  processed_file: "futu_history.csv"    # 处理后数据文件名
+
+account:
+  exclude_simulate: true      # 排除模拟账户
+  exclude_cash: true          # 排除现金账户
