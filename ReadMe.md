@@ -50,10 +50,10 @@ pip install -r requirements.txt
 
 ```bash
 # 步骤1: 下载交易数据
-python futu/download_history_flow.py
+python -m futu_cli.download_history_flow
 
 # 步骤2: 计算税务并生成报告
-python tax/stock_option_tax_calculator.py
+python -m tax.stock_option_tax_calculator
 
 # 步骤3: 查看生成的报告
 ls 税务报告/
@@ -109,14 +109,14 @@ FUTU_ENV=REAL
 #### 交易数据下载
 ```bash
 # 下载历史成交订单（耗时约10-30分钟）
-python futu/download_history_flow.py
+python -m futu_cli.download_history_flow
 # 生成文件: data/futu_history.csv
 ```
 
 #### 股息数据下载（可选）
 ```bash
 # 下载股息和股息税数据（耗时约2小时）
-python futu/download_cash_flow.py  
+python -m futu_cli.download_cash_flow
 # 生成文件: data/futu_cash_flow.csv
 ```
 
@@ -141,16 +141,16 @@ US.AAPL,50,175.00,sell,USD,0.50,2024-04-10 11:15:00
 #### 基本计算
 ```bash
 # 使用默认配置计算税务
-python tax/stock_option_tax_calculator.py
+python -m tax.stock_option_tax_calculator
 
 # 自定义输入输出路径
-python tax/stock_option_tax_calculator.py --input data/my_trades.csv --output my_reports/
+python -m tax.stock_option_tax_calculator --input data/my_trades.csv --output my_reports/
 ```
 
 #### 验证计算结果
 ```bash
 # 运行测试用例验证算法正确性
-python tax/test_calculator.py
+python -m tax.test_calculator
 ```
 
 ### 4. 查看报告
@@ -200,7 +200,7 @@ US.AAPL240315C160000,1,5.50,sell,USD,0.65,2024-03-01 15:30:00
 ### 运行测试
 ```bash
 # 运行所有测试用例
-python tax/test_calculator.py
+python -m tax.test_calculator
 
 # 查看测试结果
 ✅ 验证通过: 2024_report.csv 与 test_data_2024.csv 一致
@@ -215,7 +215,7 @@ futu_tax_calculator/
 │   ├── futu_history.csv       # 标准化交易数据  
 │   ├── futu_cash_flow.csv     # 股息现金流数据
 │   └── futu_rsu_history.csv   # RSU解禁数据（可选）
-├── 📂 futu/                    # 数据获取模块
+├── 📂 futu_cli/                # 数据获取模块
 │   ├── download_history_flow.py
 │   └── download_cash_flow.py
 ├── 📂 tax/                     # 税务计算模块
@@ -254,7 +254,7 @@ MIT License - 详见 LICENSE 文件
 
 ## 🏗️ 核心模块详解
 
-### 数据获取模块 (futu/)
+### 数据获取模块 (futu_cli/)
 - **download_history_flow.py**: 批量下载交易订单，支持多账户和限流保护
   - 连接管理：支持本地和远程富途OpenD网关
   - 批量下载：按3个月为批次分段下载，避免API限制

@@ -1,0 +1,10 @@
+trading:
+  direction_mapping:
+    买入:
+      - "买入"
+      - "buy"
+      - "BUY"
+    卖出:
+      - "卖出"
+      - "sell"
+      - "SELL"

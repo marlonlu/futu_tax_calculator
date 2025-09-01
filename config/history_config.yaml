@@ -11,6 +11,6 @@ output:
   raw_file: "futu_history_raw.csv"      # 原始数据文件名
   processed_file: "futu_history.csv"    # 处理后数据文件名
 
-account:
-  exclude_simulate: true      # 排除模拟账户
-  exclude_cash: true          # 排除现金账户
+tax_calculation:
+  rsu_file: 'futu_rsu_history.csv'
+  output_dir: '税务报告'

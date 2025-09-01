@@ -3,14 +3,14 @@ import subprocess
 import pandas as pd
 import sys
 import re
-from stock_option_tax_calculator import calculate_tax
+from tax.stock_option_tax_calculator import calculate_tax
 
 # 确保可以从主脚本导入 classify_asset 函数
 try:
-    from stock_option_tax_calculator import classify_asset
+    from tax.data.preprocessor import classify_asset
 except ImportError:
-    print("错误：无法从 stock_option_tax_calculator.py 导入 classify_asset。")
-    print("请确保 test_calculator.py 和 stock_option_tax_calculator.py 在同一目录下。")
+    print("错误：无法从 data.preprocessor 导入 classify_asset。")
+    print("请确保模块路径正确。")
     sys.exit(1)
 
 def run_test_case(test_dir, input_filename):
