@@ -1,13 +1,52 @@
-import re
-import pandas as pd
+"""
+股票和期权税务计算器
+
+处理富途证券的交易历史数据，计算股票和期权的税务报告。
+支持移动平均加权算法、期权到期处理和多币种汇总。
+"""
 import argparse
+import logging
 import os
-from datetime import datetime, date
+import re
+from datetime import date, datetime
+from typing import Dict, List, Optional, Tuple
 
-# 支持香港 美国期权
-option_pattern = re.compile(r'^(US|HK)\.([A-Z0-9]+)(\d{6})([CP])(\d+)$')
+import pandas as pd
 
-replacement_map = {
+
+def _setup_logging(level: str = 'INFO') -> logging.Logger:
+    """
+    配置日志系统
+    
+    Args:
+        level: 日志级别 ('DEBUG', 'INFO', 'WARNING', 'ERROR')
+        
+    Returns:
+        配置好的logger对象
+    """
+    logger = logging.getLogger('tax_calculator')
+    
+    if not logger.handlers:  # 避免重复添加handler
+        handler = logging.StreamHandler()
+        formatter = logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+    
+    logger.setLevel(getattr(logging, level.upper()))
+    return logger
+
+
+# 创建全局logger实例
+logger = _setup_logging()
+
+# 支持香港和美国期权的正则表达式模式
+OPTION_PATTERN = re.compile(r'^(US|HK)\.([A-Z0-9]+)(\d{6})([CP])(\d+)$')
+
+# 买卖方向标准化映射
+DIRECTION_MAPPING = {
     'orderside.sell': 'sell',
     'orderside.buy': 'buy',
     '卖出': 'sell',
@@ -16,60 +55,173 @@ replacement_map = {
     'buy_back': 'buy'
 }
 
-def preprocess_data(file_path):
+# 期权价格乘数
+OPTION_PRICE_MULTIPLIER = 100
+
+
+def _validate_dataframe_columns(df: pd.DataFrame) -> None:
+    """
+    验证DataFrame是否包含必需的列
+    
+    Args:
+        df: 待验证的DataFrame
+        
+    Raises:
+        ValueError: 当缺少必需列时
+    """
+    required_columns = ['交易时间', '数量', '成交价格', '合计手续费', '买卖方向', '股票代码', '结算币种']
+    missing_columns = [col for col in required_columns if col not in df.columns]
+    
+    if missing_columns:
+        raise ValueError(f"CSV文件缺少必需的列: {missing_columns}")
+    
+    if df.empty:
+        raise ValueError("CSV文件为空，没有数据记录")
+
+
+def _clean_trading_data(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    清洗交易数据的纯函数
+    
+    Args:
+        df: 原始DataFrame
+        
+    Returns:
+        清洗后的DataFrame
+    """
+    # 创建副本避免修改原数据
+    cleaned_df = df.copy()
+    
+    # 数据类型转换
+    cleaned_df['交易时间'] = pd.to_datetime(cleaned_df['交易时间'], errors='coerce')
+    cleaned_df['数量'] = pd.to_numeric(cleaned_df['数量'], errors='coerce')
+    cleaned_df['成交价格'] = pd.to_numeric(cleaned_df['成交价格'], errors='coerce')
+    cleaned_df['合计手续费'] = pd.to_numeric(cleaned_df['合计手续费'], errors='coerce')
+    
+    # 标准化买卖方向
+    cleaned_df['买卖方向'] = cleaned_df['买卖方向'].str.lower().str.strip()
+    cleaned_df['买卖方向'] = cleaned_df['买卖方向'].replace(DIRECTION_MAPPING)
+    
+    # 移除关键数据列中的NaN值
+    before_count = len(cleaned_df)
+    cleaned_df.dropna(subset=['数量', '成交价格', '合计手续费', '交易时间'], inplace=True)
+    after_count = len(cleaned_df)
+    
+    if before_count > after_count:
+        print(f"Warning: 移除了 {before_count - after_count} 行包含无效数据的记录")
+    
+    # 按时间排序
+    cleaned_df.sort_values(by='交易时间', inplace=True)
+    
+    return cleaned_df
+
+
+def preprocess_data(file_path: str) -> pd.DataFrame:
     """
     加载并预处理交易数据
+    
+    Args:
+        file_path: CSV文件路径
+        
+    Returns:
+        预处理后的DataFrame
+        
+    Raises:
+        FileNotFoundError: 当输入文件不存在时
+        ValueError: 当文件格式错误或数据无效时
     """
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"输入文件未找到: {file_path}")
-
-    df = pd.read_csv(file_path)
-
-    # 数据清洗和类型转换
-    df['交易时间'] = pd.to_datetime(df['交易时间'])
-    df['数量'] = pd.to_numeric(df['数量'], errors='coerce')
-    df['成交价格'] = pd.to_numeric(df['成交价格'], errors='coerce')
-    df['合计手续费'] = pd.to_numeric(df['合计手续费'], errors='coerce')
-
-    df['买卖方向'] = df['买卖方向'].str.lower().str.strip()
-    # 步骤2: 执行替换操作，此时字典中的键应该都是小写
-    df['买卖方向'] = df['买卖方向'].replace(replacement_map)
-
-    # 移除关键数据列中的NaN值
-    df.dropna(subset=['数量', '成交价格', '合计手续费', '交易时间'], inplace=True)
-
-    # 按时间排序是保证后续计算正确性的关键
-    df.sort_values(by='交易时间', inplace=True)
-
-    return df
+    
+    try:
+        df = pd.read_csv(file_path)
+    except Exception as e:
+        raise ValueError(f"读取CSV文件失败: {e}")
+    
+    # 验证数据格式
+    _validate_dataframe_columns(df)
+    
+    # 清洗数据
+    cleaned_df = _clean_trading_data(df)
+    
+    if cleaned_df.empty:
+        raise ValueError("处理后的数据为空，请检查输入文件的数据质量")
+    
+    return cleaned_df
 
 
-def classify_asset(code):
+def classify_asset(code: str) -> str:
     """
-    根据股票代码安全地区分资产类型。
+    根据股票代码安全地区分资产类型
+    
+    Args:
+        code: 股票或期权代码
+        
+    Returns:
+        'Stock' 或 'Option'
     """
     if not isinstance(code, str):
         return 'Stock'
-    if option_pattern.match(code):
+    if OPTION_PATTERN.match(code):
         return 'Option'
     return 'Stock'
 
 
-def is_buy(row):
+def is_buy(row: pd.Series) -> bool:
+    """判断是否为买入操作"""
     direction = str(row['买卖方向']).lower()
-    may_be_buy = replacement_map.get(direction, direction)
-    return may_be_buy == 'buy'
+    normalized_direction = DIRECTION_MAPPING.get(direction, direction)
+    return normalized_direction == 'buy'
 
 
-def is_sell(row):
+def is_sell(row: pd.Series) -> bool:
+    """判断是否为卖出操作"""
     direction = str(row['买卖方向']).lower()
-    may_be_sell = replacement_map.get(direction, direction)
-    return may_be_sell == 'sell'
+    normalized_direction = DIRECTION_MAPPING.get(direction, direction)
+    return normalized_direction == 'sell'
 
 
-def process_stock_transactions(df, code):
+def create_sales_record(code: str, sale_price: float, cost_price: float, 
+                       quantity: int, profit: float, trade_time: datetime,
+                       currency: str, note: str = '') -> Dict[str, any]:
     """
-    处理单个股票的完整历史交易记录。
+    创建销售记录的纯函数
+    
+    Args:
+        code: 股票代码
+        sale_price: 卖出价格
+        cost_price: 成本价
+        quantity: 数量
+        profit: 利润
+        trade_time: 交易时间
+        currency: 结算币种
+        note: 备注信息
+        
+    Returns:
+        销售记录字典
+    """
+    return {
+        '股票代码': code,
+        '卖出价格': sale_price,
+        '成本价': cost_price,
+        '数量': quantity,
+        '利润': round(profit, 4),
+        '时间': trade_time,
+        '结算币种': currency,
+        '备注': note
+    }
+
+
+def process_stock_transactions(df: pd.DataFrame, code: str) -> List[Dict[str, any]]:
+    """
+    处理单个股票的完整历史交易记录，使用移动平均加权算法
+    
+    Args:
+        df: 单个股票的交易记录DataFrame
+        code: 股票代码
+        
+    Returns:
+        销售记录列表
     """
     holdings = {'quantity': 0, 'cost_basis': 0.0}
     sales_records = []
@@ -87,11 +239,10 @@ def process_stock_transactions(df, code):
 
             if holdings['quantity'] == 0:
                 # 卖出时无持仓（可能是数据记录不全或卖空）
-                sales_records.append({
-                    '股票代码': code, '卖出价格': sale_price, '成本价': 0,
-                    '数量': sold_quantity, '利润': 0, '时间': row['交易时间'],
-                    '结算币种': row['结算币种'], '备注': '卖出时无持仓, 需手动核查'
-                })
+                sales_records.append(create_sales_record(
+                    code, sale_price, 0, sold_quantity, 0, 
+                    row['交易时间'], row['结算币种'], '卖出时无持仓, 需手动核查'
+                ))
                 continue
 
             avg_cost_per_share = round(holdings['cost_basis'] / holdings['quantity'], 4)
@@ -101,22 +252,20 @@ def process_stock_transactions(df, code):
 
             if actual_sold_quantity > 0:
                 profit = (sale_price - avg_cost_per_share) * actual_sold_quantity - row['合计手续费']
-                sales_records.append({
-                    '股票代码': code, '卖出价格': sale_price, '成本价': avg_cost_per_share,
-                    '数量': actual_sold_quantity, '利润': round(profit, 4), '时间': row['交易时间'],
-                    '结算币种': row['结算币种'], '备注': ''
-                })
+                sales_records.append(create_sales_record(
+                    code, sale_price, avg_cost_per_share, actual_sold_quantity, profit,
+                    row['交易时间'], row['结算币种']
+                ))
                 holdings['cost_basis'] -= avg_cost_per_share * actual_sold_quantity
                 holdings['quantity'] -= actual_sold_quantity
 
             if sold_quantity > actual_sold_quantity:
                 # 卖超的部分
                 extra_quantity = sold_quantity - actual_sold_quantity
-                sales_records.append({
-                    '股票代码': code, '卖出价格': sale_price, '成本价': 0,
-                    '数量': extra_quantity, '利润': 0, '时间': row['交易时间'],
-                    '结算币种': row['结算币种'], '备注': '卖超持仓, 需手动核查'
-                })
+                sales_records.append(create_sales_record(
+                    code, sale_price, 0, extra_quantity, 0,
+                    row['交易时间'], row['结算币种'], '卖超持仓, 需手动核查'
+                ))
                 # 将持仓清零
                 holdings['quantity'] = 0
                 holdings['cost_basis'] = 0
@@ -126,56 +275,163 @@ def process_stock_transactions(df, code):
     return sales_records
 
 
-def is_expiration_future_or_current(expiration_date_str) -> bool:
+def is_expiration_future_or_current(expiration_date_str: Optional[str]) -> bool:
+    """
+    检查期权到期日是否为未来或当前日期
+    
+    Args:
+        expiration_date_str: 格式为 'YYYY-MM-DD' 的日期字符串
+        
+    Returns:
+        True 如果到期日是未来或当前日期，False 如果已过期或无效
+    """
     if not expiration_date_str:
-        # 如果输入是 None 或空字符串，直接认为是过期的
-        print(f"Warning: Invalid date expiration_date_str.")
+        print("Warning: Invalid date expiration_date_str.")
         return False
+        
     try:
-        # 2. 将输入的字符串转换为 date 对象
-        #    我们只关心日期，不需要时间部分，所以使用 date 对象进行比较更精确。
         expiration_date = datetime.strptime(expiration_date_str, '%Y-%m-%d').date()
     except (ValueError, TypeError):
-        # 如果字符串格式不正确 (e.g., '2024-4-19') 或类型错误 (e.g., 传入一个整数)
         print(f"Warning: Invalid date format or type for input '{expiration_date_str}'. Treated as expired.")
         return False
 
-    # 3. 获取今天的日期
     current_date = date.today()
-    # 4. 核心逻辑：比较日期
-    #    如果到期日大于或等于今天，则它没有过期。
     return expiration_date >= current_date
 
 
-def extract_expiration_date(option_code):
+def extract_expiration_date(option_code: str) -> Optional[str]:
     """
-    从多种格式的期权代码中解析到期日，并将其格式化为 'YYYY-MM-DD'。
+    从期权代码中解析到期日
+    
     兼容格式:
     - TSLA240419C200000 (标准美股)
     - US.KWEB250919C36000 (带 'US.' 前缀)
     - HK.TCH251030C550000 (带 'HK.' 前缀)
+    
     Args:
-        option_code (str): 期权代码字符串。
+        option_code: 期权代码字符串
+        
     Returns:
-        str | None: 格式化后的日期 'YYYY-MM-DD'，如果格式不匹配则返回 None。
+        格式化后的日期 'YYYY-MM-DD'，如果格式不匹配则返回 None
     """
-    # 步骤 1: 构建一个更通用的正则表达式
     pattern = re.compile(r'^(?:(?:US|HK)\.)?[A-Z0-9]+(\d{6})[CP]\d+$')
-
+    
     match = pattern.match(option_code)
     if not match:
         print(f"Warning: Code '{option_code}' does not match any known option format.")
         return None
-    # 步骤 2: 提取日期字符串
-    # 无论是否有前缀，日期始终是唯一的那个捕获组 (group 1)
-    date_str = match.group(1)  # -> '240419', '250919', '251030'
-    # 步骤 3: 转换格式 (此部分逻辑不变)
+        
+    date_str = match.group(1)  # 提取日期部分，如 '240419'
+    
     try:
         expiration_date_obj = datetime.strptime(date_str, '%y%m%d')
         return expiration_date_obj.strftime('%Y-%m-%d')
     except ValueError:
         print(f"Warning: Extracted date string '{date_str}' from '{option_code}' is not valid.")
         return None
+
+
+def _handle_buy_to_close(holdings: Dict[str, float], qty: int, price: float, 
+                        fee: float, code: str, row: pd.Series, 
+                        price_multiplier: int) -> Tuple[Dict[str, any], Dict[str, float]]:
+    """
+    处理期权买入平仓操作的纯函数
+    
+    Args:
+        holdings: 当前持仓状态
+        qty: 买入数量
+        price: 买入价格
+        fee: 手续费
+        code: 期权代码
+        row: 交易记录行
+        price_multiplier: 价格乘数
+        
+    Returns:
+        (销售记录字典, 更新后的持仓状态)
+        
+    Raises:
+        ValueError: 当持仓状态异常时
+    """
+    if holdings['quantity'] >= 0:
+        raise ValueError(f"买入平仓时持仓应为负数，当前持仓: {holdings['quantity']}")
+    
+    if holdings['short_proceeds'] <= 0:
+        raise ValueError(f"空头收入应大于0，当前值: {holdings['short_proceeds']}")
+    
+    close_quantity = min(qty, abs(holdings['quantity']))
+    
+    # 计算空头头寸的平均开仓价格
+    avg_short_price_per_contract = holdings['short_proceeds'] / (
+        abs(holdings['quantity']) * price_multiplier)
+    
+    # 平仓成本和收入
+    close_cost = close_quantity * price * price_multiplier + fee
+    proceeds_to_close = close_quantity * avg_short_price_per_contract * price_multiplier
+    profit = proceeds_to_close - close_cost
+    
+    # 创建销售记录
+    sales_record = create_sales_record(
+        code, round(avg_short_price_per_contract, 4), price, 
+        close_quantity, profit, row['交易时间'], row['结算币种'], '卖空平仓'
+    )
+    
+    # 更新持仓状态
+    updated_holdings = holdings.copy()
+    updated_holdings['quantity'] += close_quantity
+    updated_holdings['short_proceeds'] -= proceeds_to_close
+    
+    return sales_record, updated_holdings
+
+
+def _handle_sell_to_close(holdings: Dict[str, float], qty: int, price: float, 
+                         fee: float, code: str, row: pd.Series, 
+                         price_multiplier: int) -> Tuple[Dict[str, any], Dict[str, float]]:
+    """
+    处理期权卖出平仓操作的纯函数
+    
+    Args:
+        holdings: 当前持仓状态
+        qty: 卖出数量
+        price: 卖出价格
+        fee: 手续费
+        code: 期权代码
+        row: 交易记录行
+        price_multiplier: 价格乘数
+        
+    Returns:
+        (销售记录字典, 更新后的持仓状态)
+        
+    Raises:
+        ValueError: 当持仓状态异常时
+    """
+    if holdings['quantity'] <= 0:
+        raise ValueError(f"卖出平仓时持仓应为正数，当前持仓: {holdings['quantity']}")
+    
+    if holdings['cost_basis'] <= 0:
+        raise ValueError(f"成本基础应大于0，当前值: {holdings['cost_basis']}")
+    
+    sell_quantity = min(qty, holdings['quantity'])
+    
+    # 计算多头头寸的平均成本价
+    avg_long_cost_per_contract = holdings['cost_basis'] / holdings['quantity'] / price_multiplier
+    
+    # 平仓收入和成本
+    sale_proceeds = sell_quantity * price * price_multiplier - fee
+    cost_to_close = sell_quantity * avg_long_cost_per_contract * price_multiplier
+    profit = sale_proceeds - cost_to_close
+    
+    # 创建销售记录
+    sales_record = create_sales_record(
+        code, price, round(avg_long_cost_per_contract, 4), 
+        sell_quantity, profit, row['交易时间'], row['结算币种']
+    )
+    
+    # 更新持仓状态
+    updated_holdings = holdings.copy()
+    updated_holdings['quantity'] -= sell_quantity
+    updated_holdings['cost_basis'] -= cost_to_close
+    
+    return sales_record, updated_holdings
 
 
 def process_option_transactions(df, code):
@@ -188,7 +444,7 @@ def process_option_transactions(df, code):
     # short_proceeds: 空头头寸的总收入 (卖出价 * 数量 * 乘数 - 手续费)
     holdings = {'quantity': 0, 'cost_basis': 0.0, 'short_proceeds': 0.0}
     sales_records = []
-    price_multiplier = 100
+    price_multiplier = OPTION_PRICE_MULTIPLIER
 
     # 1. 解析期权到期日
     expiration_date = extract_expiration_date(code)
@@ -369,7 +625,7 @@ def generate_and_save_reports(df, output_dir):
             total_profit = currency_df['利润'].sum()
 
             # 识别期权并计算正确的交易金额
-            is_option = currency_df['股票代码'].str.match(option_pattern)
+            is_option = currency_df['股票代码'].str.match(OPTION_PATTERN)
             multiplier = is_option.apply(lambda x: 100 if x else 1)
 
             total_sales_value = (currency_df['卖出价格'] * currency_df['数量'] * multiplier).sum()
@@ -407,7 +663,7 @@ def generate_and_save_reports(df, output_dir):
 
         output_filename = os.path.join(output_dir, f"{year}_report.csv")
         final_report_df.to_csv(output_filename, index=False, encoding='utf-8-sig', float_format='%.4f')
-        print(f"税务报告已保存至: {output_filename}")
+        logger.info("税务报告已保存至: %s", output_filename)
 
     return True
 
@@ -424,33 +680,33 @@ def calculate_tax(input_file, output_dir):
     rsu_file_path = os.path.join(input_dir, 'futu_rsu_history.csv')
     # 2. 检查文件是否存在
     if os.path.exists(rsu_file_path):
-        print(f"检测到 RSU 历史文件: {rsu_file_path}, 开始合并处理...")
+        logger.info("检测到 RSU 历史文件: %s, 开始合并处理...", rsu_file_path)
 
         # 3. 加载并预处理 RSU 数据
         rsu_df = preprocess_data(rsu_file_path)
         if rsu_df is not None and not rsu_df.empty:
             # 4. 合并两个 DataFrame
-            print("正在合并主交易数据与 RSU 数据...")
+            logger.info("正在合并主交易数据与 RSU 数据...")
             transactions_df = pd.concat([transactions_df, rsu_df], ignore_index=True)
 
             # 5. 对合并后的数据全局按时间排序
-            print("正在按交易时间重新排序所有记录...")
+            logger.info("正在按交易时间重新排序所有记录...")
             transactions_df.sort_values(by='交易时间', inplace=True, ignore_index=True)
-            print("数据合并与排序完成。")
+            logger.info("数据合并与排序完成。")
     else:
-        print("未检测到 RSU 历史文件，跳过合并步骤。")
+        logger.info("未检测到 RSU 历史文件，跳过合并步骤。")
 
     # 步骤 2: 区分资产类型
     transactions_df['资产类型'] = transactions_df['股票代码'].apply(classify_asset)
-    print("数据加载和预处理完成。")
+    logger.info("数据加载和预处理完成。")
 
     # 步骤 3: 根据新逻辑生成并保存报告
     reports_were_generated = generate_and_save_reports(transactions_df, output_dir)
 
     if reports_were_generated:
-        print(f"\n处理完成，年度报告已保存在目录: {output_dir}")
+        logger.info("处理完成，年度报告已保存在目录: %s", output_dir)
     else:
-        print("\n处理完成，但没有发现任何可报告的卖出交易，因此未生成任何报告。")
+        logger.info("处理完成，但没有发现任何可报告的卖出交易，因此未生成任何报告。")
 
 
 if __name__ == '__main__':

@@ -3,6 +3,7 @@ import subprocess
 import pandas as pd
 import sys
 import re
+import pytest
 from stock_option_tax_calculator import calculate_tax
 
 # 确保可以从主脚本导入 classify_asset 函数
@@ -130,7 +131,16 @@ def main():
         key_csv = 'test_data.csv'
         if key_csv in files:
             print(f"开始测试数据目录 '{root}'")
-            success, message = run_test_case(root, key_csv)
+            
+            if '15_无效' in root:
+                with pytest.raises(ValueError) as cm:
+                    success, message = run_test_case(root, key_csv)
+
+                assert cm.type == ValueError
+                success = True
+            else:        
+                success, message = run_test_case(root, key_csv)
+
             if not success:
                 all_tests_passed = False
                 print(f"❌ {root} {message}\n")
