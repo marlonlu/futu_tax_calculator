@@ -7,6 +7,14 @@ from datetime import datetime, date
 # 支持香港 美国期权
 option_pattern = re.compile(r'^(US|HK)\.([A-Z0-9]+)(\d{6})([CP])(\d+)$')
 
+replacement_map = {
+    'orderside.sell': 'sell',
+    'orderside.buy': 'buy',
+    '卖出': 'sell',
+    '买入': 'buy',
+    'sell_short': 'sell',
+    'buy_back': 'buy'
+}
 
 def preprocess_data(file_path):
     """
@@ -25,14 +33,6 @@ def preprocess_data(file_path):
 
     df['买卖方向'] = df['买卖方向'].str.lower().str.strip()
     # 步骤2: 执行替换操作，此时字典中的键应该都是小写
-    replacement_map = {
-        'orderside.sell': 'sell',
-        'orderside.buy': 'buy',
-        '卖出': 'sell',
-        '买入': 'buy',
-        'sell_short': 'sell',
-        'buy_back': 'buy'
-    }
     df['买卖方向'] = df['买卖方向'].replace(replacement_map)
 
     # 移除关键数据列中的NaN值
@@ -56,11 +56,15 @@ def classify_asset(code):
 
 
 def is_buy(row):
-    return str(row['买卖方向']).lower() == 'buy'
+    direction = str(row['买卖方向']).lower()
+    may_be_buy = replacement_map.get(direction, direction)
+    return may_be_buy == 'buy'
 
 
 def is_sell(row):
-    return str(row['买卖方向']).lower() == 'sell'
+    direction = str(row['买卖方向']).lower()
+    may_be_sell = replacement_map.get(direction, direction)
+    return may_be_sell == 'sell'
 
 
 def process_stock_transactions(df, code):
@@ -116,6 +120,8 @@ def process_stock_transactions(df, code):
                 # 将持仓清零
                 holdings['quantity'] = 0
                 holdings['cost_basis'] = 0
+        else:
+            raise ValueError(f"Unknown direction: {row['买卖方向']}")
 
     return sales_records
 

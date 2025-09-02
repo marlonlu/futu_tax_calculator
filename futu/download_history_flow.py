@@ -31,6 +31,22 @@ class RateLimiter:
             # 添加新的请求记录
             self.requests.append(time.time())
 
+
+def _remove_duplicate_deals(deals_df: pd.DataFrame) -> pd.DataFrame:
+    """移除重复的成交记录并记录日志。"""
+    # 重复订单定义: order_id, qty, price, trd_side, create_time 一致
+    duplicate_cols = ['order_id', 'qty', 'price', 'trd_side', 'create_time']
+    # 找出要被移除的重复记录
+    duplicate_rows = deals_df[deals_df.duplicated(subset=duplicate_cols, keep='first')]
+
+    if not duplicate_rows.empty:
+        logger.info(f"发现并移除 {len(duplicate_rows)} 条重复的成交记录，详情如下:")
+        logger.info(f"\n{duplicate_rows.to_string()}")
+
+    # 合并重复订单，只保留一条
+    return deals_df.drop_duplicates(subset=duplicate_cols, keep='first')
+
+
 def get_history_orders():
     host = os.environ.get("FUTU_ADDRESS", "").strip()
     port = int(os.environ.get("FUTU_PORT"))
@@ -171,6 +187,8 @@ def get_history_orders():
                         print(f'acc_id={acc_id_int} 获取订单费用失败:', fee_df)
             if fee_list:
                 all_fee_df = pd.concat(fee_list, ignore_index=True)
+                # 多账户查询，可能同一个订单 id 返回多个，这里去重
+                all_fee_df = all_fee_df.groupby('order_id', as_index=False).first()
             else:
                 all_fee_df = pd.DataFrame(columns=['order_id', 'fee_amount'])
             # 合并费用到订单表
@@ -192,7 +210,10 @@ def get_history_orders():
         # ignore_index=True 表示排序后重新生成一个从 0 开始的连续索引，非常推荐！
         final_df = final_df.sort_values(by='create_time', ascending=True, ignore_index=True)
         # ====== 新增结束 ======
-        
+
+        print("更新手续费后再次去重，查看是否有异常")
+        final_df = _remove_duplicate_deals(final_df)
+
         # 打印最终结果的汇总信息
         # print(final_df)
         
