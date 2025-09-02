@@ -41,7 +41,16 @@ def process_option_transactions(df, code):
                 holdings, qty, price, fee, row, code, price_multiplier
             ))
 
-    return sales_records
+    # 3. 处理期权到期的未平仓头寸
+    currency = df_sorted['结算币种'].iloc[-1] if not df_sorted.empty else 'USD'
+    expiration_records = handle_option_expiration(
+        holdings, code, expiration_date, expiration_note, currency
+    )
+    
+    # 4. 合并交易记录和到期记录
+    all_records = sales_records + expiration_records
+    
+    return all_records, holdings, expiration_date, expiration_note
 
 
 def handle_option_expiration(holdings, code, expiration_date, expiration_note, currency):
@@ -65,25 +74,25 @@ def handle_option_expiration(holdings, code, expiration_date, expiration_note, c
             '股票代码': code, '卖出价格': 0, '成本价': round(avg_cost, 4),
             '数量': holdings['quantity'], '利润': round(profit, 4),
             '时间': expiration_date, '结算币种': currency,
-            '备注': f'期权到期作废 {expiration_note}'.strip()
+            '备注': f'到期作废 1手=100股 {expiration_note}'.strip()
         })
         
     elif holdings['quantity'] < 0:
         # 场景二：空头头寸剩余，视为到期盈利 (Seller keeps the premium)
-        # 相当于以 0 成本买回归零，利润就是剩余的`short_proceeds`
+        # 卖空期权到期，保留全部权利金收入作为利润
         remaining_quantity = abs(holdings['quantity'])
-        profit = holdings['short_proceeds']
+        profit = holdings['short_proceeds']  # 权利金收入已扣除手续费
         avg_sell_price = holdings['short_proceeds'] / remaining_quantity / price_multiplier
 
         expiration_records.append({
             '股票代码': code,
-            '卖出价格': round(avg_sell_price, 4),  # 名义上的平均卖出价
-            '成本价': 0,  # 以0成本买回
+            '卖出价格': round(avg_sell_price, 4),  # 原始卖出价格
+            '成本价': 0,  # 到期时以0成本平仓
             '数量': remaining_quantity,
             '利润': round(profit, 4),
             '时间': expiration_date,
             '结算币种': currency,
-            '备注': f'卖空期权到期 {expiration_note}'.strip()
+            '备注': f'到期作废 1手=100股 {expiration_note}'.strip()
         })
 
     return expiration_records
@@ -96,16 +105,9 @@ def process_option_with_expiration(df, code):
     # 确保数据按时间从早到晚排序
     df_sorted = df.sort_values(by='交易时间', ascending=True).reset_index(drop=True)
     
-    sales_records, holdings, expiration_date, expiration_note = process_option_transactions(df_sorted, code)
+    # 直接调用 process_option_transactions，它已经包含了到期处理
+    all_records, holdings, expiration_date, expiration_note = process_option_transactions(df_sorted, code)
     
-    # 处理到期
-    currency = df_sorted['结算币种'].iloc[-1] if not df_sorted.empty else 'USD'
-    expiration_records = handle_option_expiration(
-        holdings, code, expiration_date, expiration_note, currency
-    )
-    
-    # 合并记录
-    all_records = sales_records + expiration_records
     return all_records, holdings, expiration_date, expiration_note
 
 

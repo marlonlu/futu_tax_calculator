@@ -4,7 +4,13 @@ trading:
       - "买入"
       - "buy"
       - "BUY"
+      - "orderside.buy"
+      - "buy_back"      # 期权回购（平空仓）
+      - "BUY_BACK"
     卖出:
       - "卖出"
       - "sell"
       - "SELL"
+      - "orderside.sell"
+      - "sell_short"    # 期权卖空（开空仓）
+      - "SELL_SHORT"

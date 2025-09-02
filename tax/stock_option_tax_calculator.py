@@ -96,19 +96,63 @@ def generate_sales_records(transactions_df):
     logger = logging.getLogger(__name__)
     all_sales_records = []
     
+    # 调试信息：检查输入数据
+    logger.info(f"输入数据行数: {len(transactions_df)}")
+    logger.info(f"输入数据列名: {list(transactions_df.columns)}")
+    
+    if transactions_df.empty:
+        logger.warning("输入的交易数据为空")
+        return all_sales_records
+    
+    # 调试信息：检查股票代码分组
+    unique_codes = transactions_df['股票代码'].unique()
+    logger.info(f"发现 {len(unique_codes)} 个唯一股票代码: {unique_codes[:5]}...")  # 只显示前5个
+    
+    # 调试信息：检查资产类型分布
+    asset_type_counts = transactions_df['资产类型'].value_counts()
+    logger.info(f"资产类型分布: {dict(asset_type_counts)}")
+    
     # 按"股票代码"分组处理，生成所有交易的盈亏记录
+    processed_count = 0
     for code, group_df in transactions_df.groupby('股票代码'):
         asset_type = group_df['资产类型'].iloc[0]
-        logger.debug(f"正在处理资产: {code} ({asset_type})")
+        group_size = len(group_df)
+        logger.debug(f"正在处理资产: {code} ({asset_type}), 交易记录数: {group_size}")
         
-        if asset_type == 'Stock':
-            stock_results = process_stock_transactions(group_df, code)
-            all_sales_records.extend(stock_results)
-        elif asset_type == 'Option':
-            option_results = process_option_transactions(group_df, code)
-            all_sales_records.extend(option_results)
+        try:
+            if asset_type == 'Stock':
+                stock_results = process_stock_transactions(group_df, code)
+                logger.debug(f"股票 {code} 处理结果: {len(stock_results)} 条记录")
+                all_sales_records.extend(stock_results)
+            elif asset_type == 'Option':
+                option_records, _, _, _ = process_option_transactions(group_df, code)
+                logger.debug(f"期权 {code} 处理结果: {len(option_records)} 条记录")
+                all_sales_records.extend(option_records)
+            else:
+                logger.warning(f"未知资产类型: {asset_type} (股票代码: {code})")
+            
+            processed_count += 1
+            
+        except Exception as e:
+            logger.error(f"处理资产 {code} 时发生错误: {e}")
+            continue
     
-    logger.info(f"生成交易盈亏记录完成，共 {len(all_sales_records)} 条记录")
+    logger.info(f"处理完成: 共处理 {processed_count} 个资产，生成 {len(all_sales_records)} 条交易盈亏记录")
+    
+    # 如果没有生成任何记录，输出详细的调试信息
+    if not all_sales_records:
+        logger.warning("⚠️  没有生成任何交易盈亏记录，可能原因:")
+        logger.warning("1. 所有交易都是买入操作，没有卖出操作")
+        logger.warning("2. 数据格式不符合处理器要求")
+        logger.warning("3. 资产类型分类错误")
+        
+        # 输出前几行数据样本用于调试
+        if not transactions_df.empty:
+            logger.info("数据样本 (前3行):")
+            for i, row in transactions_df.head(3).iterrows():
+                logger.info(f"  行{i}: 股票代码={row.get('股票代码')}, 资产类型={row.get('资产类型')}, "
+                          f"交易方向={row.get('交易方向')}, 数量={row.get('数量')}")
+    
     return all_sales_records
 
 
@@ -146,6 +190,7 @@ def calculate_tax(input_file, output_dir):
             logger.warning("处理完成，但没有发现任何可报告的卖出交易，因此未生成任何报告。")
             return
         
+
         # 步骤 7: 生成并保存报告
         reports_were_generated = generate_and_save_reports(sales_records, output_dir)
         

@@ -39,7 +39,38 @@ def preprocess_data(file_path):
     df['买卖方向'] = df['买卖方向'].str.lower().str.strip()
     # 使用配置化的买卖方向映射
     replacement_map = _load_direction_mapping()
-    df['买卖方向'] = df['买卖方向'].replace(replacement_map)
+    
+    # 调试信息：检查原始买卖方向数据
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.debug(f"原始买卖方向唯一值: {df['买卖方向'].unique()}")
+    
+    # 处理买卖方向映射，包括 OrderSide 格式
+    def map_direction(direction_str):
+        if pd.isna(direction_str):
+            return None
+        
+        # 转换为小写并映射
+        direction_lower = str(direction_str).lower().strip()
+
+        # 处理 OrderSide.Sell / OrderSide.Buy 格式
+        if direction_lower.startswith('orderside.'):
+            direction_str = direction_lower.replace('orderside.', '')
+        
+
+        mapped = replacement_map.get(direction_lower)
+        
+        if mapped is None:
+            logger.warning(f"未知的买卖方向: '{direction_str}' -> '{direction_lower}'")
+        
+        return mapped
+    
+    # 创建交易方向列
+    df['交易方向'] = df['买卖方向'].apply(map_direction)
+    
+    # 调试信息：检查映射后的结果
+    logger.debug(f"映射后交易方向唯一值: {df['交易方向'].unique()}")
+    logger.debug(f"交易方向为None的记录数: {df['交易方向'].isna().sum()}")
 
     # 移除关键数据列中的NaN值
     df.dropna(subset=['数量', '成交价格', '合计手续费', '交易时间'], inplace=True)
@@ -63,9 +94,9 @@ def classify_asset(code):
 
 def is_buy(row):
     """判断是否为买入操作"""
-    return str(row['买卖方向']).lower() == 'buy'
+    return str(row['交易方向']).lower() == '买入'
 
 
 def is_sell(row):
     """判断是否为卖出操作"""
-    return str(row['买卖方向']).lower() == 'sell'
+    return str(row['交易方向']).lower() == '卖出'

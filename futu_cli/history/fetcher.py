@@ -57,6 +57,21 @@ def _fetch_deals_for_account(
     return deals_for_account
 
 
+def _remove_duplicate_deals(deals_df: pd.DataFrame) -> pd.DataFrame:
+    """移除重复的成交记录并记录日志。"""
+    # 重复订单定义: order_id, qty, price, trd_side, create_time 一致
+    duplicate_cols = ['order_id', 'qty', 'price', 'trd_side', 'create_time']
+    # 找出要被移除的重复记录
+    duplicate_rows = deals_df[deals_df.duplicated(subset=duplicate_cols, keep='first')]
+
+    if not duplicate_rows.empty:
+        logger.info(f"发现并移除 {len(duplicate_rows)} 条重复的成交记录，详情如下:")
+        logger.info(f"\n{duplicate_rows.to_string()}")
+
+    # 合并重复订单，只保留一条
+    return deals_df.drop_duplicates(subset=duplicate_cols, keep='first')
+
+
 def _perform_deal_fetch(trade_ctx: OpenSecTradeContext, config: dict) -> pd.DataFrame:
     """内部函数，执行实际的历史成交数据获取逻辑。"""
     rate_limiter = create_rate_limiter(max_requests=9, time_window=30)
@@ -78,7 +93,8 @@ def _perform_deal_fetch(trade_ctx: OpenSecTradeContext, config: dict) -> pd.Data
 
     final_df = pd.concat(all_deals, ignore_index=True)
     logger.info(f"总共获取 {len(final_df)} 条成交记录。")
-    return final_df
+
+    return _remove_duplicate_deals(final_df)
 
 
 def fetch_history_deals(trade_ctx: OpenSecTradeContext, config: dict) -> pd.DataFrame:
