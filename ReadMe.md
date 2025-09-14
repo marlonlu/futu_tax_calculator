@@ -33,6 +33,21 @@
 
 ## 🚀 快速开始
 
+### RSU数据配置（必需，如有RSU交易）
+
+如有公司解禁股票交易，**必须**在 `data/` 目录下创建 `futu_rsu_history.csv`：
+
+授予的买卖方向填 buy, 卖出则是 sell
+授予的成交价格需要填 公司授予日的授予价格，以免计算增值价格出错
+
+示例：
+```
+股票代码,数量,成交价格,买卖方向,结算币种,合计手续费,交易时间
+HK.00700,100,150.00,buy,HKD,0.00,2024-01-15 09:30:00
+HK.00700,50,180.00,sell,HKD,0.50,2024-03-20 14:30:00
+HK.00700,50,175.00,sell,HKD,0.50,2024-04-10 11:15:00
+```
+
 ### 环境准备
 ```bash
 # 1. 创建虚拟环境
@@ -48,6 +63,17 @@ pip install -r requirements.txt
 ### 基本使用流程
 1. **配置富途API** → 2. **下载交易数据** → 3. **计算税务** → 4. **查看报告**
 
+#### FutuApi准备
+下载地址在这个文档里
+https://openapi.futunn.com/futu-api-doc/opend/opend-cmd.html
+
+如果访问不了，记得翻墙切全局 非大陆 IP
+
+可直接下载  [MacOs 的 版本](https://www.futunn.com/download/fetch-lasted-link?name=opend-macos)  
+
+这里以 MacOsGUI 版本为例，下载后解压缩，打开Futu_OpenD-GUI_9.4.5418_Mac，里面安装 DMG，然后默认登录，首次设备需短信验证
+
+#### 下载数据
 ```bash
 # 步骤1: 下载交易数据
 python futu/download_history_flow.py
@@ -57,6 +83,19 @@ python tax/stock_option_tax_calculator.py
 
 # 步骤3: 查看生成的报告
 ls 税务报告/
+```
+
+#### 环境配置特殊说明
+如果你是在本机运行，而且没有更改 FutuOpenD 端口，则忽略此环境配置
+```
+如果你不是本地运行 FutuOpenD，
+记得添加 .env 文件，里面编辑，
+
+FUTU_ADDRESS=127.0.0.1
+FUTU_PORT=11111
+FUTU_ENV=REAL
+# 如果非本地连接，需配置RSA密钥路径
+# FUTU_RSA=path/to/your/rsa/key
 ```
 
 ## 📊 支持的交易场景
