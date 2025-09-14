@@ -31,8 +31,8 @@ class FutuClient:
         Returns:
             Tuple[OpenQuoteContext, OpenSecTradeContext]: (quote_ctx, trade_ctx) 连接对象元组
         """
-        host = os.environ.get("FUTU_ADDRESS", "").strip()
-        port = int(os.environ.get("FUTU_PORT"))
+        host = os.environ.get("FUTU_ADDRESS", "127.0.0.1").strip()
+        port = int(os.environ.get("FUTU_PORT", "11111"))
         is_local_futu_api = host == "127.0.0.1"
         
         if is_local_futu_api:
