@@ -241,7 +241,7 @@ def run_cash_flow_download_flow(start_date: datetime, end_date: datetime):
 if __name__ == '__main__':
     try:
         args = parse_arguments()
-        # run_cash_flow_download_flow(args.start_date_obj, args.end_date_obj)
+        run_cash_flow_download_flow(args.start_date_obj, args.end_date_obj)
 
         # 调试用
         # run_cash_flow_download_flow(

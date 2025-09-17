@@ -59,7 +59,25 @@ https://openapi.futunn.com/futu-api-doc/opend/opend-cmd.html
 
 这里以 MacOsGUI 版本为例，下载后解压缩，打开Futu_OpenD-GUI_9.4.5418_Mac，里面安装 DMG，然后默认登录，首次设备需短信验证
 
-#### 下载数据
+#### 滞纳金汇率说明
+涉及美股滞纳金，汇率以当年最后一个工作日查询汇率
+可以在官方汇率网站查询 
+如果 12.31 号不是工作日，则往前找最后一个工作日
+
+http://m.safe.gov.cn/safe/rmbhlzjj/index.html#
+
+#### 下载股息和股息税数据
+```
+# 下载股息和股息税数据（耗时可能需要约2小时）
+python futu/download_cash_flow.py 
+默认股息流水路径是 data/futu_cash_flow.csv
+```
+特别说明
+- 这个 csv 包含了默认 3 年前所有股息&股息税流水，打开 csv 文件自行过滤年份&货币统计每年股息
+- 港股只有股息，没有股息税，
+- 美股有点特殊，流水里包含有-10% 扣掉的股息税
+
+#### 下载&统计股票、期权盈利
 ```bash
 # 步骤1: 下载交易数据
 python futu/download_history_flow.py
