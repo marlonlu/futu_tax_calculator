@@ -351,9 +351,16 @@ def run_download_flow(start_date: datetime, end_date: datetime):
             fetch_all_deals_for_account(trade_ctx, acc_row, markets_to_query, rate_limiter, start_date, end_date)
             for _, acc_row in valid_accounts.iterrows()
         )
-        all_deals_df = pd.concat(all_deals_iter, ignore_index=True)
 
-        if all_deals_df.empty:
+        # 转换并过滤
+        all_deals_list = []
+        for item in all_deals_iter:
+            if isinstance(item, pd.DataFrame) and not item.empty:
+                all_deals_list.append(item)
+        if all_deals_list:
+            all_deals_df = pd.concat(all_deals_list, ignore_index=True)
+            logger.info(f"成功处理 {len(all_deals_df)} 行交易记录")
+        else:
             logger.info("在指定的时间范围内未找到任何成交记录。")
             return
 
