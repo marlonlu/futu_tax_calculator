@@ -95,13 +95,13 @@ def filter_dividend_cash_flow(df: pd.DataFrame) -> pd.DataFrame:
 
     hk_dividend_pattern = '现金种子|现金股息|分红派息'
     is_hk_dividend = (
-            (df['currency'] == 'HKD') &
+            (df['currency'].str.upper() == 'HKD') &
             (df['cashflow_type'].str.contains(hk_dividend_pattern, na=False,  regex=True))
     )
     us_dividend_pattern = 'SHARES DIVIDENDS|SHARES WITHHOLDING TAX'
     is_us_dividend_or_tax = (
-            (df['currency'] == 'USD') &
-            (df['cashflow_remark'].str.contains(us_dividend_pattern, na=False, regex=True))
+            (df['currency'].str.upper() == 'USD') &
+            (df['cashflow_remark'].str.contains(us_dividend_pattern, na=False, regex=True, case=False))
     )
     is_amount_not_zero = df['cashflow_amount'] != 0
     final_mask = (is_hk_dividend | is_us_dividend_or_tax) & is_amount_not_zero
@@ -138,11 +138,11 @@ def transform_to_output_format(df: pd.DataFrame) -> pd.DataFrame:
 
 # --- 文件保存 ---
 
-def save_cash_flow_to_file(output_df: pd.DataFrame) -> None:
+def save_cash_flow_to_file(output_df: pd.DataFrame, output_filename: str) -> None:
     """将格式化后的数据保存到CSV文件。"""
     output_dir = os.path.join(os.path.dirname(__file__), '..', 'data')
     os.makedirs(output_dir, exist_ok=True)
-    out_path = os.path.join(output_dir, 'futu_cash_flow.csv')
+    out_path = os.path.join(output_dir, output_filename)
     output_df.to_csv(out_path, index=False, encoding='utf-8-sig')
     logger.info(f"股息现金流数据已导出到: {out_path}")
 
@@ -223,6 +223,9 @@ def run_cash_flow_download_flow(start_date: datetime, end_date: datetime):
     logger.info("所有数据获取完毕，开始进行本地处理...")
     raw_df = pd.concat(all_cash_flow_data, ignore_index=True)
 
+    # 保存原始流水，方便分析
+    save_cash_flow_to_file(raw_df, 'futu_cash_flow_raw.csv')
+
     processed_df = (
         raw_df
         .pipe(filter_dividend_cash_flow)
@@ -234,7 +237,7 @@ def run_cash_flow_download_flow(start_date: datetime, end_date: datetime):
         return
 
     output_df = transform_to_output_format(processed_df)
-    save_cash_flow_to_file(output_df)
+    save_cash_flow_to_file(output_df, 'futu_cash_flow.csv')
 
     logger.info("流程执行完毕。")
 
