@@ -93,9 +93,10 @@ def filter_dividend_cash_flow(df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
     logger.info(f"开始从 {len(df)} 条记录中筛选股息相关流水...")
 
+    hk_dividend_pattern = '现金种子|现金股息|分红派息'
     is_hk_dividend = (
             (df['currency'] == 'HKD') &
-            (df['cashflow_type'].str.contains('现金种子', na=False))
+            (df['cashflow_type'].str.contains(hk_dividend_pattern, na=False,  regex=True))
     )
     us_dividend_pattern = 'SHARES DIVIDENDS|SHARES WITHHOLDING TAX'
     is_us_dividend_or_tax = (
