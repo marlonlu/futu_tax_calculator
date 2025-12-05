@@ -27,7 +27,9 @@ DIRECTION_MAPPING = {
     '卖出': 'sell',
     '买入': 'buy',
     'sell_short': 'sell',
-    'buy_back': 'buy'
+    'buy_back': 'buy',
+    'buy': 'buy',
+    'sell': 'sell'
 }
 
 # 期权价格乘数
