@@ -1,11 +1,12 @@
 # download_cash_flow.py
 
 import argparse
+import json
 import logging
 import os
 import sys
 from datetime import datetime, timedelta
-from typing import Generator, List
+from typing import Dict, Generator
 
 import pandas as pd
 from futu import *
@@ -24,6 +25,14 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# --- 路径与检查点配置 ---
+DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
+RAW_TEMP_PATH = os.path.join(DATA_DIR, 'futu_cash_flow_raw.tmp.csv')
+RAW_FINAL_PATH = os.path.join(DATA_DIR, 'futu_cash_flow_raw.csv')
+OUTPUT_PATH = os.path.join(DATA_DIR, 'futu_cash_flow.csv')
+CHECKPOINT_PATH = os.path.join(DATA_DIR, '.cash_flow_checkpoint.json')
+os.makedirs(DATA_DIR, exist_ok=True)
 
 
 # --- 数据获取 (Data Fetching Tier) ---
@@ -83,6 +92,36 @@ def fetch_cash_flow_by_day(trade_ctx, acc_id: int, start_date: datetime, end_dat
     logger.info(f"账户 {acc_id}: 查询完成。")
 
 
+# --- 持久化工具 ---
+
+def _load_checkpoint() -> Dict:
+    if not os.path.exists(CHECKPOINT_PATH):
+        return {"accounts": {}, "raw_path": RAW_TEMP_PATH, "schema_version": 1}
+    try:
+        with open(CHECKPOINT_PATH, 'r', encoding='utf-8') as fp:
+            state = json.load(fp)
+            if "accounts" not in state:
+                state["accounts"] = {}
+            if "raw_path" not in state:
+                state["raw_path"] = RAW_TEMP_PATH
+            return state
+    except Exception as e:
+        logger.warning(f"读取检查点失败，忽略并重新开始: {e}")
+        return {"accounts": {}, "raw_path": RAW_TEMP_PATH, "schema_version": 1}
+
+
+def _save_checkpoint(state: Dict) -> None:
+    tmp_path = f"{CHECKPOINT_PATH}.tmp"
+    with open(tmp_path, 'w', encoding='utf-8') as fp:
+        json.dump(state, fp, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, CHECKPOINT_PATH)
+
+
+def _append_raw_data(raw_path: str, df: pd.DataFrame) -> None:
+    write_header = not os.path.exists(raw_path)
+    df.to_csv(raw_path, mode='a', index=False, encoding='utf-8-sig', header=write_header)
+
+
 # --- 数据处理管道 (Data Processing Pipeline) ---
 # 以下所有处理函数保持不变，因为它们只关心输入DataFrame的内容，不关心其获取方式。
 
@@ -138,13 +177,11 @@ def transform_to_output_format(df: pd.DataFrame) -> pd.DataFrame:
 
 # --- 文件保存 ---
 
-def save_cash_flow_to_file(output_df: pd.DataFrame, output_filename: str) -> None:
-    """将格式化后的数据保存到CSV文件。"""
-    output_dir = os.path.join(os.path.dirname(__file__), '..', 'data')
-    os.makedirs(output_dir, exist_ok=True)
-    out_path = os.path.join(output_dir, output_filename)
-    output_df.to_csv(out_path, index=False, encoding='utf-8-sig')
-    logger.info(f"股息现金流数据已导出到: {out_path}")
+def save_cash_flow_to_file(output_df: pd.DataFrame, output_path: str) -> None:
+    """将格式化后的数据保存到指定CSV文件。"""
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    output_df.to_csv(output_path, index=False, encoding='utf-8-sig')
+    logger.info(f"股息现金流数据已导出到: {output_path}")
 
 
 # --- 主流程与参数解析 (Application Entry Point) ---
@@ -187,9 +224,10 @@ def run_cash_flow_download_flow(start_date: datetime, end_date: datetime):
     执行完整的现金流数据下载和处理流程。
     """
     logger.info(f"开始执行现金流数据下载流程，时间范围: {start_date.date()} 到 {end_date.date()}")
+    checkpoint = _load_checkpoint()
+    checkpoint["raw_path"] = checkpoint.get("raw_path", RAW_TEMP_PATH)
     futu_client = FutuClient()
     rate_limiter = RateLimiter(max_requests=19, time_window=30)
-    all_cash_flow_data: List[pd.DataFrame] = []
 
     try:
         _, trade_ctx = futu_client.create_connections()
@@ -197,16 +235,29 @@ def run_cash_flow_download_flow(start_date: datetime, end_date: datetime):
 
         logger.info(f"发现 {len(valid_accounts)} 个有效账户，将逐个查询现金流...")
 
-        # --- 结构优化：使用显式循环代替生成器表达式，使逻辑更清晰 ---
         for _, acc_row in valid_accounts.iterrows():
             acc_id = int(acc_row['acc_id'])
+            acc_key = str(acc_id)
+            last_date_str = checkpoint["accounts"].get(acc_key, {}).get("last_date")
+            resume_start = start_date
+            if last_date_str:
+                try:
+                    last_date = datetime.strptime(last_date_str, '%Y-%m-%d')
+                    resume_start = max(start_date, last_date + timedelta(days=1))
+                except ValueError:
+                    logger.warning(f"检查点日期无效，重新从起始日期下载: {last_date_str}")
+            if resume_start > end_date:
+                logger.info(f"账户 {acc_id}: 已覆盖请求区间，跳过下载。")
+                continue
 
-            # 为此账户获取所有现金流数据
             cash_flow_generator = fetch_cash_flow_by_day(
-                trade_ctx, acc_id, start_date, end_date, rate_limiter
+                trade_ctx, acc_id, resume_start, end_date, rate_limiter
             )
-            # 消耗生成器并将结果添加到总列表中
-            all_cash_flow_data.extend(list(cash_flow_generator))
+            for df_chunk in cash_flow_generator:
+                _append_raw_data(checkpoint["raw_path"], df_chunk)
+                last_date = pd.to_datetime(df_chunk['clearing_date'].iloc[0]).strftime('%Y-%m-%d')
+                checkpoint["accounts"][acc_key] = {"last_date": last_date}
+                _save_checkpoint(checkpoint)
 
     except Exception as e:
         logger.error(f"在数据获取阶段发生错误: {e}", exc_info=True)
@@ -215,17 +266,17 @@ def run_cash_flow_download_flow(start_date: datetime, end_date: datetime):
         logger.info("正在关闭 Futu API 连接...")
         futu_client.close_connections()
 
-    if not all_cash_flow_data:
-        logger.info("所有账户在指定的时间范围内未找到任何现金流记录。")
+    if not os.path.exists(checkpoint["raw_path"]):
+        logger.info("未找到原始流水文件，流程结束。")
         return
 
-    # --- 数据转换 (Transform) & 加载 (Load) 流程保持不变 ---
+    try:
+        raw_df = pd.read_csv(checkpoint["raw_path"])
+    except Exception as e:
+        logger.error(f"读取原始流水失败: {e}")
+        return
+
     logger.info("所有数据获取完毕，开始进行本地处理...")
-    raw_df = pd.concat(all_cash_flow_data, ignore_index=True)
-
-    # 保存原始流水，方便分析
-    save_cash_flow_to_file(raw_df, 'futu_cash_flow_raw.csv')
-
     processed_df = (
         raw_df
         .pipe(filter_dividend_cash_flow)
@@ -234,12 +285,19 @@ def run_cash_flow_download_flow(start_date: datetime, end_date: datetime):
 
     if processed_df.empty:
         logger.info("筛选后，没有符合条件的股息相关现金流记录。")
+        if os.path.exists(checkpoint["raw_path"]):
+            os.replace(checkpoint["raw_path"], RAW_FINAL_PATH)
+        if os.path.exists(CHECKPOINT_PATH):
+            os.remove(CHECKPOINT_PATH)
         return
 
     output_df = transform_to_output_format(processed_df)
-    save_cash_flow_to_file(output_df, 'futu_cash_flow.csv')
+    save_cash_flow_to_file(output_df, OUTPUT_PATH)
 
-    logger.info("流程执行完毕。")
+    os.replace(checkpoint["raw_path"], RAW_FINAL_PATH)
+    if os.path.exists(CHECKPOINT_PATH):
+        os.remove(CHECKPOINT_PATH)
+    logger.info(f"流程执行完毕，原始流水保存在 {RAW_FINAL_PATH}，股息流水保存在 {OUTPUT_PATH}。")
 
 
 if __name__ == '__main__':
