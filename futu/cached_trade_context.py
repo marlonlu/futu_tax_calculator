@@ -12,6 +12,7 @@ import pandas as pd
 from futu import TrdEnv
 
 from api_cache import ApiCache
+from rate_limiter import RateLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -22,11 +23,18 @@ class CachedTradeContext:
     其他未包装的方法会透传到原始 trade_ctx。
     """
 
-    def __init__(self, trade_ctx: Any, cache_dir: str | None = None):
+    def __init__(
+        self,
+        trade_ctx: Any,
+        cache_dir: str | None = None,
+        rate_limiter: RateLimiter | None = None,
+    ):
         self._trade_ctx = trade_ctx
         base_dir = os.path.dirname(__file__)
         default_dir = os.path.join(base_dir, "..", "data", "api_cache")
         self._cache = ApiCache(cache_dir or default_dir)
+        # RateLimiter 仅在实际访问远端接口（缓存未命中）时使用
+        self._rate_limiter = rate_limiter
 
     # --- 包装的只读方法 ---
 
@@ -39,6 +47,8 @@ class CachedTradeContext:
         }
 
         def fetch():
+            if self._rate_limiter is not None:
+                self._rate_limiter.wait_if_needed()
             logger.info(f"[CachedTradeContext] 调用远端: {method_name} {params}")
             return self._trade_ctx.get_acc_cash_flow(
                 clearing_date=clearing_date,
@@ -65,6 +75,8 @@ class CachedTradeContext:
         }
 
         def fetch():
+            if self._rate_limiter is not None:
+                self._rate_limiter.wait_if_needed()
             logger.info(f"[CachedTradeContext] 调用远端: {method_name} {params}")
             return self._trade_ctx.history_deal_list_query(
                 acc_id=acc_id,
@@ -93,6 +105,8 @@ class CachedTradeContext:
         }
 
         def fetch():
+            if self._rate_limiter is not None:
+                self._rate_limiter.wait_if_needed()
             logger.info(f"[CachedTradeContext] 调用远端: {method_name} (订单数={len(order_ids_sorted)})")
             return self._trade_ctx.order_fee_query(
                 order_id_list=order_ids_sorted,

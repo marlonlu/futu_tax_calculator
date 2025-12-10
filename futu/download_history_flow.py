@@ -45,7 +45,6 @@ def query_deals_by_date_range(
         trade_ctx,
         acc_id: int,
         market,
-        rate_limiter: RateLimiter,
         start_date: datetime,
         end_date: datetime,
 ) -> Generator[pd.DataFrame, None, None]:
@@ -56,7 +55,6 @@ def query_deals_by_date_range(
         trade_ctx: 交易上下文对象。
         acc_id: 账户ID。
         market: 市场类型。
-        rate_limiter: 请求限制器。
         start_date: 查询开始时间。
         end_date: 查询结束时间。
 
@@ -65,7 +63,6 @@ def query_deals_by_date_range(
     """
     for start_chunk, end_chunk in _generate_date_chunks(start_date, end_date):
         logger.info(f"账户 {acc_id}: 正在获取 {start_chunk.strftime('%Y-%m-%d')} 到 {end_chunk.strftime('%Y-%m-%d')} 的成交数据...")
-        rate_limiter.wait_if_needed()
 
         ret, data = trade_ctx.history_deal_list_query(
             acc_id=acc_id,
@@ -86,7 +83,6 @@ def fetch_all_deals_for_account(
         trade_ctx,
         acc_row: pd.Series,
         markets: list,
-        rate_limiter: RateLimiter,
         start_date: datetime,
         end_date: datetime,
 ) -> Iterable[pd.DataFrame]:
@@ -97,7 +93,6 @@ def fetch_all_deals_for_account(
         trade_ctx: 交易上下文对象。
         acc_row: 包含账户信息的 Pandas Series。
         markets: 要查询的市场列表。
-        rate_limiter: 请求限制器。
         start_date: 查询开始时间。
         end_date: 查询结束时间。
 
@@ -114,7 +109,7 @@ def fetch_all_deals_for_account(
     # 使用 itertools.chain.from_iterable 将多层嵌套的生成器扁平化
     return itertools.chain.from_iterable(
         query_deals_by_date_range(
-            trade_ctx, acc_id, market, rate_limiter, start_date, end_date
+            trade_ctx, acc_id, market, start_date, end_date
         )
         for market in markets
     )
@@ -360,7 +355,7 @@ def run_download_flow(start_date: datetime, end_date: datetime):
 
     try:
         quote_ctx, raw_trade_ctx = futu_client.create_connections()
-        trade_ctx = CachedTradeContext(raw_trade_ctx)
+        trade_ctx = CachedTradeContext(raw_trade_ctx, rate_limiter=rate_limiter)
         valid_accounts = futu_client.get_valid_accounts(trade_ctx)
 
         # --- 1. 数据提取 (Extract) ---
@@ -369,7 +364,6 @@ def run_download_flow(start_date: datetime, end_date: datetime):
                 trade_ctx,
                 acc_row,
                 markets_to_query,
-                rate_limiter,
                 start_date,
                 end_date,
             )
