@@ -6,7 +6,7 @@
 
 import logging
 import os
-from typing import Any, Iterable, List, Tuple
+from typing import Any, Iterable, List, Optional, Tuple
 
 import pandas as pd
 from futu import TrdEnv
@@ -26,8 +26,8 @@ class CachedTradeContext:
     def __init__(
         self,
         trade_ctx: Any,
-        cache_dir: str | None = None,
-        rate_limiter: RateLimiter | None = None,
+        cache_dir: Optional[str] = None,
+        rate_limiter: Optional[RateLimiter] = None,
     ):
         self._trade_ctx = trade_ctx
         base_dir = os.path.dirname(__file__)
