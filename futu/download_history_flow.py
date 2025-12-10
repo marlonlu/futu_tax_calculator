@@ -8,6 +8,7 @@ from typing import Generator, Iterable, Tuple
 import pandas as pd
 from futu import *
 from futu_client import FutuClient
+from cached_trade_context import CachedTradeContext
 from rate_limiter import RateLimiter
 
 # --- 配置日志记录 ---
@@ -40,7 +41,14 @@ def _generate_date_chunks(start_date: datetime, end_date: datetime, days_per_chu
         current_start = current_end
 
 
-def query_deals_by_date_range(trade_ctx, acc_id: int, market, rate_limiter: RateLimiter, start_date: datetime, end_date: datetime) -> Generator[pd.DataFrame, None, None]:
+def query_deals_by_date_range(
+        trade_ctx,
+        acc_id: int,
+        market,
+        rate_limiter: RateLimiter,
+        start_date: datetime,
+        end_date: datetime,
+) -> Generator[pd.DataFrame, None, None]:
     """
     按时间范围分批查询成交记录，并作为生成器返回。
 
@@ -68,14 +76,20 @@ def query_deals_by_date_range(trade_ctx, acc_id: int, market, rate_limiter: Rate
 
         if ret != RET_OK:
             raise Exception(f'获取历史成交失败: {data}')
-
         if isinstance(data, pd.DataFrame) and not data.empty:
             data['acc_id'] = acc_id
             logger.info(f"    成功获取 {len(data)} 条成交记录。")
             yield data
 
 
-def fetch_all_deals_for_account(trade_ctx, acc_row: pd.Series, markets: list, rate_limiter: RateLimiter, start_date: datetime, end_date: datetime) -> Iterable[pd.DataFrame]:
+def fetch_all_deals_for_account(
+        trade_ctx,
+        acc_row: pd.Series,
+        markets: list,
+        rate_limiter: RateLimiter,
+        start_date: datetime,
+        end_date: datetime,
+) -> Iterable[pd.DataFrame]:
     """
     查询单个账户在指定市场范围内的所有成交记录。
 
@@ -99,7 +113,9 @@ def fetch_all_deals_for_account(trade_ctx, acc_row: pd.Series, markets: list, ra
 
     # 使用 itertools.chain.from_iterable 将多层嵌套的生成器扁平化
     return itertools.chain.from_iterable(
-        query_deals_by_date_range(trade_ctx, acc_id, market, rate_limiter, start_date, end_date)
+        query_deals_by_date_range(
+            trade_ctx, acc_id, market, rate_limiter, start_date, end_date
+        )
         for market in markets
     )
 
@@ -343,12 +359,20 @@ def run_download_flow(start_date: datetime, end_date: datetime):
     markets_to_query = [TrdMarket.NONE]
 
     try:
-        quote_ctx, trade_ctx = futu_client.create_connections()
+        quote_ctx, raw_trade_ctx = futu_client.create_connections()
+        trade_ctx = CachedTradeContext(raw_trade_ctx)
         valid_accounts = futu_client.get_valid_accounts(trade_ctx)
 
         # --- 1. 数据提取 (Extract) ---
         all_deals_iter = itertools.chain.from_iterable(
-            fetch_all_deals_for_account(trade_ctx, acc_row, markets_to_query, rate_limiter, start_date, end_date)
+            fetch_all_deals_for_account(
+                trade_ctx,
+                acc_row,
+                markets_to_query,
+                rate_limiter,
+                start_date,
+                end_date,
+            )
             for _, acc_row in valid_accounts.iterrows()
         )
 
@@ -401,4 +425,3 @@ if __name__ == '__main__':
     except Exception as e:
         logger.error(f"程序执行过程中发生未捕获的错误: {e}", exc_info=True)
         # exc_info=True 会在日志中记录完整的堆栈跟踪信息，非常适合调试
-
