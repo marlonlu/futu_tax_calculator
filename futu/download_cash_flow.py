@@ -13,9 +13,10 @@ from futu import *
 # 确保可以从同级目录导入
 try:
     from futu_client import FutuClient
+    from cached_trade_context import CachedTradeContext
     from rate_limiter import RateLimiter
 except ImportError:
-    print("错误：无法导入 futu_client 或 rate_limiter。请确保这些文件与 download_cash_flow.py 在同一目录中。")
+    print("错误：无法导入 futu_client、rate_limiter 或 cached_trade_context。请确保这些文件与 download_cash_flow.py 在同一目录中。")
     sys.exit(1)
 
 # --- 配置日志记录 ---
@@ -36,8 +37,12 @@ def _generate_daily_dates(start_date: datetime, end_date: datetime) -> Generator
         current_date += timedelta(days=1)
 
 
-def fetch_cash_flow_by_day(trade_ctx, acc_id: int, start_date: datetime, end_date: datetime,
-                           rate_limiter: RateLimiter) -> Generator[pd.DataFrame, None, None]:
+def fetch_cash_flow_by_day(
+        trade_ctx,
+        acc_id: int,
+        start_date: datetime,
+        end_date: datetime,
+) -> Generator[pd.DataFrame, None, None]:
     """
     为单个账户逐日获取现金流记录，并提供详细的进度日志。
     这是一个生成器函数，每次API调用成功后返回一个 DataFrame。
@@ -58,8 +63,6 @@ def fetch_cash_flow_by_day(trade_ctx, acc_id: int, start_date: datetime, end_dat
             f"[账户 {acc_id}] [进度 {day_count}/{total_days} ({progress_percent:.1f}%)] "
             f"正在查询日期: {day_str}..."
         )
-
-        rate_limiter.wait_if_needed()
 
         ret, data = trade_ctx.get_acc_cash_flow(
             clearing_date=day_str,
@@ -192,18 +195,18 @@ def run_cash_flow_download_flow(start_date: datetime, end_date: datetime):
     all_cash_flow_data: List[pd.DataFrame] = []
 
     try:
-        _, trade_ctx = futu_client.create_connections()
+        _, raw_trade_ctx = futu_client.create_connections()
+        trade_ctx = CachedTradeContext(raw_trade_ctx, rate_limiter=rate_limiter)
         valid_accounts = futu_client.get_valid_accounts(trade_ctx)
 
         logger.info(f"发现 {len(valid_accounts)} 个有效账户，将逐个查询现金流...")
 
-        # --- 结构优化：使用显式循环代替生成器表达式，使逻辑更清晰 ---
         for _, acc_row in valid_accounts.iterrows():
             acc_id = int(acc_row['acc_id'])
 
             # 为此账户获取所有现金流数据
             cash_flow_generator = fetch_cash_flow_by_day(
-                trade_ctx, acc_id, start_date, end_date, rate_limiter
+                trade_ctx, acc_id, start_date, end_date
             )
             # 消耗生成器并将结果添加到总列表中
             all_cash_flow_data.extend(list(cash_flow_generator))
