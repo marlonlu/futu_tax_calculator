@@ -148,12 +148,27 @@ def extract_expiration_date(option_code: str) -> Optional[str]:
 # 股票交易处理
 # ==============================================================================
 
-def process_stock_transactions(df: pd.DataFrame, code: str) -> List[Dict[str, Any]]:
-    """处理单个股票的完整历史交易记录，使用移动平均加权算法。"""
+def process_stock_transactions(df: pd.DataFrame, code: str, splits_for_code: Optional[List[Tuple[datetime, float]]] = None) -> List[Dict[str, Any]]:
+    """处理单个股票的完整历史交易记录，使用移动平均加权算法。
+
+    splits_for_code: 可选的拆股事件列表，元素为 (date(datetime), ratio(float))，按日期升序。
+    当迭代到交易时间 >= 拆股日期时会应用比例（持仓数量乘以 ratio，cost_basis 保持不变）。
+    """
     holdings = {'quantity': 0, 'cost_basis': 0.0}
     sales_records = []
+    # 准备拆股事件指针
+    splits_for_code = splits_for_code or []
+    split_idx = 0
 
     for row in df.itertuples(index=False):
+        # 先检查并应用配置文件中的拆股事件（按时间）
+        while split_idx < len(splits_for_code) and getattr(row, '交易时间', None) is not None and pd.to_datetime(getattr(row, '交易时间')) >= pd.to_datetime(splits_for_code[split_idx][0]):
+            split_date, ratio = splits_for_code[split_idx]
+            old_qty = holdings['quantity']
+            holdings['quantity'] = holdings['quantity'] * ratio
+            logger.info("应用配置拆股: %s, 日期: %s, 比例: %.4f, 持仓数量: %s -> %s", code, split_date, ratio, old_qty, holdings['quantity'])
+            split_idx += 1
+
         if is_buy(row):
             holdings['quantity'] += row.数量
             holdings['cost_basis'] += row.数量 * row.成交价格 + row.合计手续费
@@ -242,6 +257,131 @@ def _handle_option_expiration(holdings: Dict, code: str, last_row: Any) -> Optio
         )
     return None
 
+
+def parse_split_ratio(text: Optional[str]) -> float:
+    """从备注或交易类型文本中解析拆股比例，如 '2:1' -> 2.0, '1:2' -> 0.5, '3/2' -> 1.5。
+
+    返回大于0的浮点数，解析失败返回 1.0（表示无拆股）。
+    """
+    if not text or not isinstance(text, str):
+        return 1.0
+
+    # 常见格式：2:1, 1:2, 3/2, 3-for-2, 2-1(rare)
+    m = re.search(r"(\d+)\s*[:/\-]\s*(\d+)", text)
+    if m:
+        try:
+            num = float(m.group(1))
+            den = float(m.group(2))
+            if den == 0:
+                return 1.0
+            return num / den
+        except Exception:
+            return 1.0
+
+    # 有时备注里直接写 "2 for 1" 或 "3 for 2"
+    m = re.search(r"(\d+)\s*for\s*(\d+)", text, flags=re.I)
+    if m:
+        try:
+            num = float(m.group(1))
+            den = float(m.group(2))
+            if den == 0:
+                return 1.0
+            return num / den
+        except Exception:
+            return 1.0
+
+    # 未解析到有效比例
+    return 1.0
+
+
+def is_split(row: pd.Series) -> bool:
+    """判断行是否表示拆股/合股等公司行为（通过标准化后的买卖方向）。"""
+    try:
+        return getattr(row, '买卖方向', None) == 'split'
+    except Exception:
+        return False
+
+
+def load_splits_config(config_path: str) -> Dict[str, List[Tuple[datetime, float]]]:
+    """加载拆股配置文件，返回按股票代码分组的 (date, ratio) 列表。
+
+    支持的列名（任意一个）:
+      - 日期: '日期', 'date', '拆股日期', '时间'
+      - 股票代码: '股票代码', '代码', 'symbol'
+      - 比例: '比例', 'ratio', 'ratio_text'
+
+    比例字段可以是类似 '2:1' 的文本，也可以是数值（例如 2 或 0.5）。
+    若文件不存在或解析失败，返回空字典并记录日志。
+    """
+    if not os.path.exists(config_path):
+        logger.info("拆股配置文件未找到，路径: %s，跳过拆股配置加载。", config_path)
+        return {}
+
+    try:
+        cfg = pd.read_csv(config_path)
+    except Exception as e:
+        logger.error("读取拆股配置失败: %s", e)
+        return {}
+
+    # 自动识别列名
+    col_names = {c.lower(): c for c in cfg.columns}
+    date_col = None
+    for candidate in ('日期', 'date', '拆股日期', '时间'):
+        if candidate in cfg.columns or candidate.lower() in col_names:
+            date_col = col_names.get(candidate.lower(), candidate if candidate in cfg.columns else None)
+            break
+
+    code_col = None
+    for candidate in ('股票代码', '代码', 'symbol'):
+        if candidate in cfg.columns or candidate.lower() in col_names:
+            code_col = col_names.get(candidate.lower(), candidate if candidate in cfg.columns else None)
+            break
+
+    ratio_col = None
+    for candidate in ('比例', 'ratio', 'ratio_text'):
+        if candidate in cfg.columns or candidate.lower() in col_names:
+            ratio_col = col_names.get(candidate.lower(), candidate if candidate in cfg.columns else None)
+            break
+
+    if not date_col or not code_col or not ratio_col:
+        logger.error("拆股配置文件缺少必须列（日期/股票代码/比例），请检查: %s", config_path)
+        return {}
+
+    splits_map: Dict[str, List[Tuple[datetime, float]]] = {}
+    for _, r in cfg.iterrows():
+        try:
+            raw_date = r[date_col]
+            # pandas to_datetime handles many formats
+            d = pd.to_datetime(raw_date)
+        except Exception:
+            logger.warning("跳过无法解析的拆股日期: %s", r.get(date_col))
+            continue
+
+        code = str(r[code_col]).strip()
+        raw_ratio = r[ratio_col]
+        ratio = 1.0
+        # 若为字符串，则尝试解析 '2:1' 格式；若为数字则直接使用
+        if isinstance(raw_ratio, str):
+            ratio = parse_split_ratio(raw_ratio)
+        else:
+            try:
+                ratio = float(raw_ratio)
+            except Exception:
+                ratio = 1.0
+
+        if ratio <= 0 or ratio == 1.0:
+            logger.warning("解析到无效拆股比例，跳过: %s %s %s", code, d, raw_ratio)
+            continue
+
+        splits_map.setdefault(code, []).append((d.to_pydatetime(), ratio))
+
+    # 按日期排序每个代码的拆股事件
+    for code, events in splits_map.items():
+        events.sort(key=lambda x: x[0])
+
+    logger.info("已加载拆股配置，共 %d 支股票含拆股事件。", len(splits_map))
+    return splits_map
+
 def process_option_transactions(df: pd.DataFrame, code: str) -> List[Dict[str, Any]]:
     """调度器：处理单个期权的交易记录。"""
     holdings = {'quantity': 0, 'cost_basis': 0.0, 'short_proceeds': 0.0}
@@ -287,7 +427,7 @@ def process_option_transactions(df: pd.DataFrame, code: str) -> List[Dict[str, A
 # 报告生成与保存 (重构核心)
 # ==============================================================================
 
-def _process_all_transactions(df: pd.DataFrame) -> pd.DataFrame:
+def _process_all_transactions(df: pd.DataFrame, splits_map: Optional[Dict[str, List[Tuple[datetime, float]]]] = None) -> pd.DataFrame:
     """纯计算函数：处理所有资产，返回包含所有销售记录的DataFrame。"""
     all_sales_records = []
     for code, group_df in df.groupby('股票代码'):
@@ -295,7 +435,10 @@ def _process_all_transactions(df: pd.DataFrame) -> pd.DataFrame:
         logger.info(f"正在处理资产: {code} ({asset_type})")
 
         if asset_type == 'Stock':
-            results = process_stock_transactions(group_df, code)
+            splits_for_code = None
+            if splits_map and code in splits_map:
+                splits_for_code = splits_map.get(code)
+            results = process_stock_transactions(group_df, code, splits_for_code)
         else:  # Option
             results = process_option_transactions(group_df, code)
         all_sales_records.extend(results)
@@ -364,7 +507,7 @@ def _merge_rsu_data(transactions_df: pd.DataFrame, input_dir: str) -> pd.DataFra
         logger.info("未检测到 RSU 历史文件，跳过合并步骤。")
     return transactions_df
 
-def calculate_tax(input_file: str, output_dir: str):
+def calculate_tax(input_file: str, output_dir: str, splits_path: Optional[str] = None):
     """重构后的主计算函数。"""
     try:
         # 1. 加载主数据
@@ -378,8 +521,13 @@ def calculate_tax(input_file: str, output_dir: str):
         transactions_df['资产类型'] = transactions_df['股票代码'].apply(classify_asset)
         logger.info("数据加载和预处理完成。")
 
-        # 4. 计算所有交易
-        all_sales_df = _process_all_transactions(transactions_df)
+        # 4. 加载拆股配置（如果存在）并计算所有交易
+        if not splits_path:
+            # 默认在仓库的 data 目录下查找 splits.csv
+            splits_path = os.path.join(os.path.dirname(__file__), '..', 'data', 'splits.csv')
+        splits_map = load_splits_config(splits_path)
+
+        all_sales_df = _process_all_transactions(transactions_df, splits_map)
 
         # 5. 生成并保存报告
         generate_and_save_reports(all_sales_df, output_dir)
@@ -396,10 +544,12 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='股票及期权年度报税计算器')
     default_csv_path = os.path.join(os.path.dirname(__file__), '..', 'data', 'futu_history.csv')
     default_out_dir = os.path.join(os.path.dirname(__file__), '..', '税务报告')
+    default_splits_path = os.path.join(os.path.dirname(__file__), '..', 'data', 'splits.csv')
 
     parser.add_argument('--input', type=str, default=default_csv_path, help='输入的CSV文件路径')
     parser.add_argument('--output', type=str, default=default_out_dir, help='输出报告的文件夹路径')
+    parser.add_argument('--splits', type=str, default=default_splits_path, help='可选的拆股配置CSV文件路径')
     args = parser.parse_args()
 
     os.makedirs(args.output, exist_ok=True)
-    calculate_tax(args.input, args.output)
+    calculate_tax(args.input, args.output, args.splits)
